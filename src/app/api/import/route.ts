@@ -1,4 +1,5 @@
 
+
 import { JSDOM } from 'jsdom';
 import puppeteer from 'puppeteer';
 import OpenAI from 'openai';
@@ -116,7 +117,7 @@ async function scrapeUrl(url: string, sendStatus?: (msg: string) => void) {
 // --- MAIN HANDLER ---
 
 export async function POST(request: Request) {
-  const { url: input, depth = 1 } = await request.json();
+  const { url: input, depth = 1, isRawText = false } = await request.json();
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
@@ -127,9 +128,50 @@ export async function POST(request: Request) {
       let searchLog: any = null;
       let scoutLogs: any[] = [];
       let juryLog: any = null;
+      let directScanLog: any = null;
 
       try {
         if (!input) throw new Error('Eingabe fehlt');
+
+        // --- SPECIAL CASE: RAW TEXT (e.g. Email) ---
+        if (isRawText) {
+            send({ type: 'status', message: '📄 Analysiere Text-Inhalt (Gmail)...' });
+            
+            const systemPrompt = SCAN_PROMPT;
+            const userContent = `SOURCE: RAW_TEXT\nCONTENT: ${input}`;
+            
+            const completion = await openai.chat.completions.create({
+                model: "gpt-4o-mini",
+                messages: [
+                    { role: "system", content: systemPrompt },
+                    { role: "user", content: userContent }
+                ],
+                response_format: { type: "json_object" }
+            });
+            
+            const result = JSON.parse(completion.choices[0].message.content || "{}");
+            
+            directScanLog = {
+                template: SCAN_PROMPT,
+                input: `Raw Text (${input.length} chars)`,
+                full_prompt: `${systemPrompt}\n\nUSER:\n${userContent}`,
+                output: result
+            };
+
+            send({
+                type: 'result',
+                data: {
+                    ...result,
+                    originalUrl: "Gmail / Raw Text",
+                    allImages: [],
+                    aiLog: {
+                        scan: directScanLog
+                    }
+                }
+            });
+            return;
+        }
+
         const isUrl = input.startsWith('http');
         
         // --- PHASE 1: SEARCH MANAGER ---
