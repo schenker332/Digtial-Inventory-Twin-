@@ -35,12 +35,17 @@ export async function POST(request: Request) {
     Eine Liste von Familien. Jede hat eine ID und einen Hauptnamen (familyName).
     
     AUFGABE:
-    1. Analysiere die Liste. Finde Einträge, die OFFENSICHTLICH dasselbe physische Produkt beschreiben.
+    1. Analysiere die Liste. Finde Einträge, die dasselbe physische Produkt beschreiben.
     2. Wenn Einträge zusammengehören, fasse sie unter einem neuen, sauberen "Canonical Name" zusammen.
     3. Der "Canonical Name" soll präzise sein (Marke + Modell + Typ), z.B. "Shimano ST-R7120 Griffgummi".
-    4. Einträge, die einzigartig sind, bleiben als eigener Cluster bestehen.
     
-    EXISTIERENDE PRODUKTE (Vermeide fast-identische Namen hierzu, nutze sie exakt wenn passend):
+    WICHTIGE REGELN FÜR MERGES:
+    - **Generisch vs. Spezifisch:** Wenn ein Eintrag "Kettenpeitsche" heißt und ein anderer "ParkTool Kettenpeitsche SR-12.2", dann GEHÖREN SIE ZUSAMMEN! Ordne den generischen Begriff dem spezifischen Cluster zu.
+    - **Synonyme & Wortstellung:** "Shimano Disc Rotor" == "Bremsscheibe Shimano". Das ist das Gleiche -> MERGEN.
+    - **Varianten:** "T-Shirt Pink M" und "T-Shirt Pink L" -> MERGEN in "T-Shirt Pink" (Größe ist egal für den Cluster).
+    - **Sei mutig bei Werkzeug/Teilen:** Niemand kauft 3 verschiedene Kettenprüfer gleichzeitig. Fasse sie zusammen.
+    
+    EXISTIERENDE PRODUKTE (Nutze diese exakt, wenn es passt):
     [${existingNames.substring(0, 1000)}]...
 
     OUTPUT FORMAT (JSON):
