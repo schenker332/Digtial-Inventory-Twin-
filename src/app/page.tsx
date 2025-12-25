@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useSession, signIn, signOut } from 'next-auth/react';
+import Link from 'next/link';
 
 export default function Home() {
   const { data: session } = useSession();
@@ -189,14 +190,12 @@ export default function Home() {
               />
               
               {session && (
-                  <button
-                    type="button"
-                    onClick={handleGmailScan}
-                    disabled={loading}
-                    className="bg-indigo-100 text-indigo-700 py-4 px-6 rounded-xl hover:bg-indigo-200 disabled:opacity-50 font-bold transition-all border border-indigo-200 shadow-sm active:scale-95 flex items-center gap-2"
+                  <Link
+                    href="/gmail"
+                    className="bg-indigo-100 text-indigo-700 py-4 px-6 rounded-xl hover:bg-indigo-200 font-bold transition-all border border-indigo-200 shadow-sm active:scale-95 flex items-center gap-2"
                   >
-                    📧 Gmail Scan
-                  </button>
+                    📧 Gmail Inspector
+                  </Link>
               )}
 
               <button

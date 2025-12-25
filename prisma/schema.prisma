@@ -1,11 +1,47 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "sqlite"
+  url      = "file:../dev.db"
+}
+
+model AnalysisCache {
+  id           String   @id // Gmail ID
+  isRelevant   Boolean
+  reasoning    String?
+  resultJson   String   // Das komplette JSON Objekt als String
+  debugInputG  String?  // Gatekeeper Input für späteres Debugging
+  debugInputE  String?  // Expert Input
+  createdAt    DateTime @default(now())
+  
+  items        Item[]
+}
+
+model Cluster {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  category  String?
+  items     Item[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Item {
+  id              String   @id @default(uuid())
+  name            String
+  price           Decimal?
+  currency        String?
+  shop            String?
+  buyDate         DateTime?
+
+  clusterId       String?
+  cluster         Cluster? @relation(fields: [clusterId], references: [id])
+
+  analysisCacheId String?
+  analysisCache   AnalysisCache? @relation(fields: [analysisCacheId], references: [id])
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 }

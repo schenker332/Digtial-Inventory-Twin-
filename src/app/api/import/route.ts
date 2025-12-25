@@ -141,7 +141,7 @@ export async function POST(request: Request) {
             const userContent = `SOURCE: RAW_TEXT\nCONTENT: ${input}`;
             
             const completion = await openai.chat.completions.create({
-                model: "gpt-4o-mini",
+                model: "gpt-5-mini",
                 messages: [
                     { role: "system", content: systemPrompt },
                     { role: "user", content: userContent }
@@ -193,7 +193,7 @@ export async function POST(request: Request) {
             const userContent = JSON.stringify(allSearchResults.slice(0, 15)); // Raw Input
             
             const completion = await openai.chat.completions.create({
-                model: "gpt-4o-mini",
+                model: "gpt-5-mini",
                 messages: [
                     { role: "system", content: systemPrompt },
                     { role: "user", content: `Candidates:\n${userContent}` }
@@ -230,7 +230,7 @@ export async function POST(request: Request) {
             const userContent = `URL: ${url}\nCONTENT: ${scraped.cleanText}\nIMAGES: ${scraped.images.slice(0, 10).join('\n')}`;
             
             const completion = await openai.chat.completions.create({
-                model: "gpt-4o-mini",
+                model: "gpt-5-mini",
                 messages: [
                     { role: "system", content: systemPrompt },
                     { role: "user", content: userContent }
