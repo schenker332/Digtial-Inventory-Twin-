@@ -3,8 +3,11 @@ import { prisma } from "@/lib/prisma";
 
 // Jaccard-Ähnlichkeit zwischen zwei Sets von Wörtern
 function calculateSimilarity(name1: string, name2: string): number {
-  const tokens1 = new Set(name1.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter(t => t.length > 2));
-  const tokens2 = new Set(name2.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter(t => t.length > 2));
+  // Bindestriche und Unterstriche durch Leerzeichen ersetzen, damit "A-B" zu "A B" wird
+  const normalize = (s: string) => s.toLowerCase().replace(/[-_]/g, " ").replace(/[^a-z0-9\s]/g, "");
+  
+  const tokens1 = new Set(normalize(name1).split(/\s+/).filter(t => t.length > 2));
+  const tokens2 = new Set(normalize(name2).split(/\s+/).filter(t => t.length > 2));
 
   const intersection = new Set([...tokens1].filter(x => tokens2.has(x)));
   const union = new Set([...tokens1, ...tokens2]);
@@ -13,7 +16,7 @@ function calculateSimilarity(name1: string, name2: string): number {
   return intersection.size / union.size;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const items = await prisma.item.findMany({
       include: { cluster: true },
@@ -35,6 +38,11 @@ export async function GET() {
     groupedMap.forEach((groupItems, name) => {
       exactGroups.push({ name, items: groupItems });
     });
+
+    // Threshold aus URL lesen (Standard: 0.6)
+    const url = new URL(request.url);
+    const thresholdParam = url.searchParams.get("threshold");
+    const threshold = thresholdParam ? parseFloat(thresholdParam) : 0.6;
 
     // 2. Level: Familien bilden mit Ähnlichkeits-Logik (O(n^2) aber okay für < 1000 Gruppen)
     const families: { familyName: string, subgroups: any[] }[] = [];
@@ -60,7 +68,7 @@ export async function GET() {
         const otherGroup = exactGroups[j];
         const similarity = calculateSimilarity(currentGroup.name, otherGroup.name);
 
-        if (similarity >= 0.6) {
+        if (similarity >= threshold) {
           family.subgroups.push({
             ...otherGroup,
             similarity: Math.round(similarity * 100)
