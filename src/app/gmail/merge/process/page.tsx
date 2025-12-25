@@ -17,7 +17,8 @@ export default function ProcessPage() {
     const [progress, setProgress] = useState(0);
     const [processLogs, setProcessLogs] = useState<ProcessLog[]>([]);
     const [liveInventory, setLiveInventory] = useState<any[]>([]); // Neue Tabelle für Ergebnisse
-    
+    const [unclustered, setUnclustered] = useState<any[]>([]); // NEU: Waisen
+
     // Wir nutzen Refs für State, der im Loop aktuell sein muss
     const familiesRef = useRef<any[]>([]);
 
@@ -45,6 +46,9 @@ export default function ProcessPage() {
                 if (data.summary) {
                     setLiveInventory(data.summary);
                 }
+                if (data.unclustered) {
+                    setUnclustered(data.unclustered);
+                }
             } catch (e) {
                 console.error("Failed to load inventory summary", e);
             }
@@ -53,6 +57,11 @@ export default function ProcessPage() {
         load();
         loadExistingInventory();
     }, []);
+
+    // ... (Restlicher Code, aber wir fügen die UI für Unclustered hinzu)
+
+    // Suchen wir die Stelle vor dem "Resultierendes Inventar" Block
+
 
     // ESC Key zum Schließen der Sidebar
     useEffect(() => {
@@ -287,6 +296,61 @@ export default function ProcessPage() {
                     </div>
                 ))}
             </div>
+
+            {/* UNCLUSTERED ITEMS WARNING */}
+            {unclustered.length > 0 && (
+                <div className="bg-red-50 rounded-2xl shadow-sm border border-red-200 overflow-hidden mb-8">
+                    <div className="p-6 border-b border-red-100 flex justify-between items-center">
+                        <div className="flex items-center gap-3">
+                            <div className="bg-red-100 text-red-600 p-2 rounded-lg">⚠️</div>
+                            <div>
+                                <h2 className="font-bold text-red-800 text-lg">Nicht zugeordnete Items (Restposten)</h2>
+                                <p className="text-xs text-red-600 uppercase tracking-widest font-bold">Wurden vom AI-Prozess nicht erfasst</p>
+                            </div>
+                        </div>
+                        <span className="bg-red-200 text-red-800 text-sm font-black px-4 py-1 rounded-full">
+                            {unclustered.length} Items
+                        </span>
+                    </div>
+                    <div className="p-0">
+                        <table className="w-full text-left text-xs text-gray-600">
+                             <thead className="bg-red-50/50 uppercase font-bold text-red-400 border-b border-red-100">
+                                 <tr>
+                                     <th className="px-6 py-3">Item Name</th>
+                                     <th className="px-6 py-3">Shop</th>
+                                     <th className="px-6 py-3">Preis</th>
+                                     <th className="px-6 py-3">Datum</th>
+                                     <th className="px-6 py-3">Mail-ID</th>
+                                 </tr>
+                             </thead>
+                             <tbody className="divide-y divide-red-100">
+                                 {unclustered.map((item: any, idx: number) => (
+                                     <tr key={idx} className="hover:bg-red-100/50">
+                                         <td className="px-6 py-3 font-medium text-gray-800">{item.name}</td>
+                                         <td className="px-6 py-3">{item.shop || "-"}</td>
+                                         <td className="px-6 py-3 font-mono">{item.price ? `${item.price} ${item.currency}` : "-"}</td>
+                                         <td className="px-6 py-3">
+                                            {item.buyDate && item.buyDate !== "Invalid Date"
+                                                ? new Date(item.buyDate).toLocaleDateString() 
+                                                : <span className="text-gray-300">-</span>}
+                                         </td>
+                                         <td className="px-6 py-3">
+                                            {item.mailId ? (
+                                                <button 
+                                                    onClick={() => fetchEmail(item.mailId)}
+                                                    className="text-red-600 hover:text-red-800 underline font-mono text-[10px]"
+                                                >
+                                                    {item.mailId.substring(0, 8)}...
+                                                </button>
+                                            ) : "-"}
+                                         </td>
+                                     </tr>
+                                 ))}
+                             </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
 
             {/* UNTERER BEREICH: LIVE INVENTORY LIST (ACCORDION STYLE) */}
             <div className="bg-white rounded-2xl shadow-xl border border-gray-200 overflow-hidden">

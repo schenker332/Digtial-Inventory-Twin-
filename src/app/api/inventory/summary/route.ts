@@ -12,6 +12,12 @@ export async function GET() {
       orderBy: { createdAt: 'desc' }
     });
 
+    // NEU: Finde Items ohne Cluster (Waisen)
+    const unclusteredItems = await prisma.item.findMany({
+        where: { clusterId: null },
+        orderBy: { buyDate: 'desc' }
+    });
+
     const summary = clusters.map(c => {
       // Extrahiere alle einzigartigen Familiennamen, die in diesen Cluster geflossen sind
       const uniqueFamilies = Array.from(new Set(c.items.map(i => i.originalFamily).filter(f => f !== null)));
@@ -31,7 +37,17 @@ export async function GET() {
       };
     });
 
-    return NextResponse.json({ summary });
+    const unclustered = unclusteredItems.map(i => ({
+        id: i.id,
+        name: i.name,
+        price: i.price,
+        currency: i.currency,
+        shop: i.shop,
+        buyDate: i.buyDate,
+        mailId: i.analysisCacheId
+    }));
+
+    return NextResponse.json({ summary, unclustered });
   } catch (error: any) {
     console.error("Inventory Summary Error:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
