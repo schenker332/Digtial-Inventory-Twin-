@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { PrismaClient } from "@prisma/client"; // Direkt importieren
 import OpenAI from "openai";
 
 const openai = new OpenAI({
@@ -7,14 +7,26 @@ const openai = new OpenAI({
 });
 
 export async function POST(request: Request) {
+  // Lokale Instanz für diesen Request (Fix für Hot-Reload Issues)
+  const prisma = new PrismaClient();
+  
   try {
-    const { families } = await request.json();
+    const { families, model = "gpt-4o-mini", preview = false, reset = false } = await request.json();
+
+    if (reset) {
+        console.log("🧹 Clearing previous clusters (Reset requested)...");
+        // 1. Items entkoppeln
+        await prisma.item.updateMany({
+            data: { clusterId: null, originalFamily: null }
+        });
+        // 2. Cluster löschen
+        await prisma.cluster.deleteMany();
+        console.log("✅ Database clean.");
+    }
 
     if (!families || !Array.isArray(families) || families.length === 0) {
       return NextResponse.json({ error: "No families provided" }, { status: 400 });
     }
-
-    console.log(`🤖 Starting AI-Merge for ${families.length} families...`);
 
     // 1. Datenaufbereitung für das LLM
     const inputList = families.map((f, index) => ({
@@ -22,7 +34,7 @@ export async function POST(request: Request) {
         familyName: f.familyName
     }));
 
-    // 2. Bestehende Cluster laden (damit wir keine Duplikate erzeugen)
+    // 2. Bestehende Cluster laden
     const existingClusters = await prisma.cluster.findMany({
         select: { name: true }
     });
@@ -61,9 +73,23 @@ export async function POST(request: Request) {
     Jede Input-ID muss genau einmal in 'idsToMerge' auftauchen! Vergiss niemanden.
     `;
 
+    // --- PREVIEW MODE ---
+    if (preview) {
+        return NextResponse.json({
+            preview: true,
+            debug: {
+                model: model,
+                systemPrompt: systemPrompt,
+                input: inputList
+            }
+        });
+    }
+
+    console.log(`🤖 Starting AI-Merge using ${model} for ${families.length} families...`);
+
     // OpenAI Aufruf
     const completion = await openai.chat.completions.create({
-        model: "gpt-4o-mini", // 4o-mini ist klug genug und schnell
+        model: model, // Dynamisches Modell
         messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: JSON.stringify(inputList) }
@@ -73,6 +99,24 @@ export async function POST(request: Request) {
 
     const result = JSON.parse(completion.choices[0].message.content || "{}");
     const merges = result.merges || [];
+
+    // --- LOG ÜBERSCHREIBEN (Radikal: Löschen & Neu) ---
+    try {
+        await prisma.processLog.deleteMany(); // Tabelle leeren
+        await prisma.processLog.create({
+            data: {
+                id: 'LATEST_RUN',
+                model: model,
+                batchSize: inputList.length,
+                systemPrompt: systemPrompt,
+                inputJson: JSON.stringify(inputList),
+                outputJson: JSON.stringify(result)
+            }
+        });
+        console.log("✅ Log saved successfully.");
+    } catch (logError) {
+        console.error("⚠️ Failed to save ProcessLog:", logError);
+    } 
 
     console.log(`✅ AI schlägt ${merges.length} Cluster vor.`);
 
@@ -160,20 +204,32 @@ export async function POST(request: Request) {
         
         logs.push(`Cluster "${canonicalName}": ${itemIdsToUpdate.length} Items zugeordnet.`);
             
-                    createdItemsDebug.push({
-                        clusterName: canonicalName,
-                        mergedFamilies: mergedFamilyNames, // NEU: Liste der Ursprungs-Familien
-                        items: itemDetails
-                    });
-            }
-        
-            return NextResponse.json({        success: true,
+            createdItemsDebug.push({
+                clusterName: canonicalName,
+                mergedFamilies: mergedFamilyNames, // NEU: Liste der Ursprungs-Familien
+                items: itemDetails
+            });
+    }
+
+    const debugObj = {
+        model: model,
+        systemPrompt: systemPrompt,
+        input: inputList,
+        output: result
+    };
+    
+    console.log("DEBUG RESPONSE PREP:", { 
+        hasPrompt: !!systemPrompt, 
+        hasInput: !!inputList, 
+        hasOutput: !!result,
+        outputKeys: Object.keys(result || {})
+    });
+
+    return NextResponse.json({
+        success: true,
         logs: logs,
         createdItems: createdItemsDebug,
-        debug: {
-            input: inputList,
-            output: result
-        }
+        debug: debugObj
     });
 
   } catch (error: any) {

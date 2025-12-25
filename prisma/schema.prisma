@@ -4,7 +4,7 @@ generator client {
 
 datasource db {
   provider = "sqlite"
-  url      = "file:../dev.db"
+  url      = env("DATABASE_URL")
 }
 
 model AnalysisCache {
@@ -46,4 +46,14 @@ model Item {
 
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+}
+
+model ProcessLog {
+  id           String   @id // Manuelle ID (z.B. "LATEST_RUN")
+  model        String
+  batchSize    Int
+  systemPrompt String
+  inputJson    String
+  outputJson   String
+  createdAt    DateTime @default(now())
 }

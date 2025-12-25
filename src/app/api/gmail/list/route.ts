@@ -3,6 +3,8 @@ import { google } from "googleapis";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
+export const dynamic = 'force-dynamic';
+
 // Helper: Rekursive Suche nach Body
 const extractBody = (parts: any[]): string => {
   // Helper für Base64Url Decoding (Gmail Standard)

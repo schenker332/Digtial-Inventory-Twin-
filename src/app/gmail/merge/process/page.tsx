@@ -18,6 +18,8 @@ export default function ProcessPage() {
     const [processLogs, setProcessLogs] = useState<ProcessLog[]>([]);
     const [liveInventory, setLiveInventory] = useState<any[]>([]); // Neue Tabelle für Ergebnisse
     const [unclustered, setUnclustered] = useState<any[]>([]); // NEU: Waisen
+    const [selectedModel, setSelectedModel] = useState("gpt-4o-mini"); // Default Model
+    const [previewData, setPreviewData] = useState<any>(null); // Live Preview
 
     // Wir nutzen Refs für State, der im Loop aktuell sein muss
     const familiesRef = useRef<any[]>([]);
@@ -27,6 +29,49 @@ export default function ProcessPage() {
     const [emailContent, setEmailContent] = useState<any>(null);
     const [loadingEmail, setLoadingEmail] = useState(false);
 
+    // NEU: Funktion in den Component Scope verschoben
+    async function loadExistingInventory() {
+        try {
+            const res = await fetch("/api/inventory/summary");
+            const data = await res.json();
+            if (data.summary) {
+                // Wir nutzen hier setLiveInventory NICHT, wenn wir mitten im Prozess sind, 
+                // weil wir das unten manuell machen (um das "Springen" zu verhindern).
+                // Aber wir aktualisieren UNCLUSTERED.
+                setUnclustered(data.unclustered || []);
+                
+                // Optional: Wenn wir nicht processing sind, laden wir auch das Inventar neu (für Full Sync)
+                if (!isProcessing) {
+                    setLiveInventory(data.summary);
+                }
+            } 
+        } catch (e) {
+            console.error("Failed to load inventory summary", e);
+        }
+    }
+
+    // FETCH PREVIEW (Live Prompt)
+    async function fetchPreview(families: any[], model: string) {
+        if (families.length === 0) return;
+        try {
+            const res = await fetch("/api/gmail/process-batch", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ 
+                    families: families.slice(0, 50), // Preview für den ersten Batch
+                    model: model,
+                    preview: true 
+                })
+            });
+            const data = await res.json();
+            if (data.preview) {
+                setPreviewData(data.debug);
+            }
+        } catch (e) {
+            console.error("Preview failed", e);
+        }
+    }
+
     useEffect(() => {
         // Initiale Daten laden (mit Standard Threshold 0.6)
         async function load() {
@@ -35,33 +80,49 @@ export default function ProcessPage() {
             const data = await res.json();
             setAllFamilies(data.families || []);
             familiesRef.current = data.families || [];
+            
+            // Sofort Preview laden
+            fetchPreview(data.families || [], selectedModel);
+            
             setLoading(false);
         }
 
-        // NEU: Bestehendes Inventar aus der DB laden
-        async function loadExistingInventory() {
+        load();
+        loadExistingInventory(); // Aufruf der Component-Scope Funktion
+
+        // NEU: Letzte Logs laden
+        async function loadLogs() {
             try {
-                const res = await fetch("/api/inventory/summary");
+                const res = await fetch("/api/gmail/logs");
                 const data = await res.json();
-                if (data.summary) {
-                    setLiveInventory(data.summary);
-                }
-                if (data.unclustered) {
-                    setUnclustered(data.unclustered);
+                if (data.log) {
+                    const restoredLog: ProcessLog = {
+                        batchId: 0, // Markierung für geladene Logs
+                        inputNames: data.log.input.map((f: any) => f.familyName),
+                        status: 'done',
+                        logs: ["Zuletzt gespeicherter Durchlauf"],
+                        debug: {
+                            model: data.log.model,
+                            systemPrompt: data.log.systemPrompt,
+                            input: data.log.input,
+                            output: data.log.output
+                        }
+                    } as any;
+                    setProcessLogs([restoredLog]);
                 }
             } catch (e) {
-                console.error("Failed to load inventory summary", e);
+                console.error("Failed to load logs", e);
             }
         }
-
-        load();
-        loadExistingInventory();
+        loadLogs();
     }, []);
 
-    // ... (Restlicher Code, aber wir fügen die UI für Unclustered hinzu)
-
-    // Suchen wir die Stelle vor dem "Resultierendes Inventar" Block
-
+    // Update Preview wenn Modell sich ändert
+    useEffect(() => {
+        if (allFamilies.length > 0) {
+            fetchPreview(allFamilies, selectedModel);
+        }
+    }, [selectedModel]);
 
     // ESC Key zum Schließen der Sidebar
     useEffect(() => {
@@ -91,7 +152,7 @@ export default function ProcessPage() {
 
     const startProcessing = async () => {
         setIsProcessing(true);
-        setLiveInventory([]); // Reset Table
+        setLiveInventory([]); // Reset Table (oder behalten?) -> Besser Reset für neuen Run
         setProcessLogs([]);
         
         let currentBatchId = 1;
@@ -116,9 +177,18 @@ export default function ProcessPage() {
                 const res = await fetch("/api/gmail/process-batch", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ families: batch })
+                    body: JSON.stringify({ 
+                        families: batch,
+                        model: selectedModel,
+                        reset: currentBatchId === 1 // RESET BEIM ERSTEN BATCH
+                    })
                 });
                 const data = await res.json();
+                console.log("API Response:", data); // DEBUGGING
+
+                if (!res.ok) {
+                    throw new Error(data.error || "Server Error");
+                }
 
                 // Log Update mit Debug Daten
                 setProcessLogs(prev => prev.map(l => 
@@ -127,7 +197,7 @@ export default function ProcessPage() {
                         ...l, 
                         status: 'done', 
                         logs: data.logs || [],
-                        debug: data.debug // Raw Input/Output speichern
+                        debug: data.debug // Jetzt inklusive systemPrompt und model
                       } 
                     : l
                 ));
@@ -136,6 +206,9 @@ export default function ProcessPage() {
                 if (data.createdItems) {
                     setLiveInventory(prev => [...data.createdItems, ...prev]);
                 }
+
+                // SYNC: Restposten Liste aktualisieren
+                loadExistingInventory(); 
 
             } catch (e) {
                 setProcessLogs(prev => prev.map(l => 
@@ -152,8 +225,6 @@ export default function ProcessPage() {
 
         setIsProcessing(false);
     };
-
-    const [selectedProduct, setSelectedProduct] = useState<any>(null); // Für die Sidebar
 
     async function processLeftovers() {
         if (!confirm("Soll die AI versuchen, diese Restposten automatisch zuzuordnen?")) return;
@@ -173,6 +244,8 @@ export default function ProcessPage() {
             setLoading(false);
         }
     }
+
+    const [selectedProduct, setSelectedProduct] = useState<any>(null); // Für die Sidebar
 
     return (
         <div className="p-8 max-w-6xl mx-auto bg-gray-50 min-h-screen font-sans space-y-12 relative">
@@ -243,107 +316,142 @@ export default function ProcessPage() {
                     </p>
                 </div>
 
-                <div className="flex flex-col gap-3 relative z-10 w-64">
-                    {!isProcessing ? (
+                <div className="flex flex-col gap-3 relative z-10 w-72">
+                    <div className="bg-gray-100 p-1 rounded-xl flex gap-1 mb-2">
                         <button 
-                            onClick={startProcessing}
-                            className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-8 rounded-xl shadow-lg shadow-blue-200 transition-all transform hover:-translate-y-1 active:scale-95 flex items-center justify-center gap-2 group"
+                            onClick={() => setSelectedModel("gpt-4o-mini")}
+                            className={`flex-1 py-1.5 text-[10px] font-black uppercase rounded-lg transition-all ${selectedModel === 'gpt-4o-mini' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-400 hover:text-gray-600'}`}
                         >
-                            <span>🚀 ANALYSE STARTEN</span>
+                            gpt-4o-mini
                         </button>
-                    ) : (
-                         <div className="bg-gray-900 text-white font-bold py-4 px-8 rounded-xl shadow-inner flex items-center justify-center gap-3">
-                            <div className="animate-spin h-5 w-5 border-2 border-blue-500 border-t-transparent rounded-full"></div>
-                            <span>Verarbeite {progress.toFixed(0)}%...</span>
-                        </div>
-                    )}
-                    
-                    {/* Progress Bar */}
-                    <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
-                        <div 
-                            className="h-full bg-gradient-to-r from-blue-500 to-indigo-600 transition-all duration-500 ease-out"
-                            style={{ width: `${progress}%` }}
-                        ></div>
+                        <button 
+                            onClick={() => setSelectedModel("gpt-5-mini")}
+                            className={`flex-1 py-1.5 text-[10px] font-black uppercase rounded-lg transition-all ${selectedModel === 'gpt-5-mini' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-400 hover:text-gray-600'}`}
+                        >
+                            gpt-5-mini
+                        </button>
                     </div>
                 </div>
             </div>
 
-            {/* BATCH LOGS GRID */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {processLogs.map(log => (
-                    <div key={log.batchId} className={`p-4 rounded-xl border-2 transition-all ${
-                        log.status === 'loading' ? 'border-blue-400 bg-blue-50 animate-pulse' :
-                        log.status === 'done' ? 'border-green-100 bg-white shadow-sm' :
-                        'border-red-100 bg-red-50'
-                    }`}>
-                        <div className="flex justify-between items-center mb-3">
-                            <span className="text-xs font-black uppercase tracking-widest text-gray-400">Batch #{log.batchId}</span>
-                            {log.status === 'done' && <span className="text-green-600 font-bold text-xs">✅ FERTIG</span>}
-                            {log.status === 'error' && <span className="text-red-600 font-bold text-xs">❌ FEHLER</span>}
+            {/* 1. ALWAYS VISIBLE PREVIEW BLOCK */}
+            {previewData && (
+                <div className="rounded-2xl border-2 border-dashed border-gray-300 bg-gray-50/50 p-6">
+                    <div className="flex justify-between items-center mb-6">
+                        <div className="flex items-center gap-3">
+                            <span className="bg-blue-100 text-blue-800 text-xs font-black uppercase px-3 py-1 rounded-full shadow-sm">Current Config</span>
+                            <span className="text-sm font-bold text-gray-500">Das wird gesendet:</span>
                         </div>
-                        
+                        <div className="text-xs font-mono text-gray-400">Model: {selectedModel}</div>
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                         <div className="space-y-2">
-                             {/* Input Preview */}
-                             <div className="text-xs text-gray-500 mb-2 border-b border-gray-100 pb-2">
-                                <strong>Input ({log.inputNames.length}):</strong> {log.inputNames.slice(0, 3).join(", ")}...
-                             </div>
-
-                             {/* Result Logs */}
-                             {log.logs.length > 0 ? (
-                                 <div className="bg-gray-100 rounded p-2 text-[10px] font-mono text-gray-600 max-h-32 overflow-y-auto">
-                                     {log.logs.map((l, i) => <div key={i}>&gt; {l}</div>)}
-                                 </div>
-                             ) : (
-                                <div className="text-[10px] text-gray-400 italic">Keine Details...</div>
-                             )}
-
-                             {/* DEBUG TOGGLE */}
-                             {log.status === 'done' && (
-                                 <details className="mt-4">
-                                     <summary className="text-[10px] font-bold text-blue-600 cursor-pointer uppercase tracking-tighter hover:underline">
-                                         Raw AI JSON anzeigen
-                                     </summary>
-                                     <div className="mt-2 text-[9px] font-mono bg-black text-green-400 p-3 rounded-lg overflow-x-auto max-h-60">
-                                         <p className="mb-2 text-white border-b border-gray-800 pb-1 font-bold">SENT TO AI:</p>
-                                         <pre className="mb-4 text-blue-300">{(log as any).debug?.input ? JSON.stringify((log as any).debug.input, null, 2) : "N/A"}</pre>
-                                         <p className="mb-2 text-white border-b border-gray-800 pb-1 font-bold">AI RESPONSE:</p>
-                                         <pre>{(log as any).debug?.output ? JSON.stringify((log as any).debug.output, null, 2) : "N/A"}</pre>
-                                     </div>
-                                 </details>
-                             )}
+                            <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">System Prompt</p>
+                            <div className="bg-white rounded-xl p-4 text-[10px] font-mono text-gray-500 overflow-y-auto max-h-40 border border-gray-200 shadow-sm">
+                                <pre className="whitespace-pre-wrap">{previewData.systemPrompt}</pre>
+                            </div>
+                        </div>
+                        <div className="space-y-2">
+                            <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Input Data</p>
+                            <div className="bg-white rounded-xl p-4 text-[10px] font-mono text-gray-500 overflow-y-auto max-h-40 border border-gray-200 shadow-sm">
+                                <pre>{JSON.stringify(previewData.input, null, 2)}</pre>
+                            </div>
                         </div>
                     </div>
-                ))}
+                </div>
+            )}
+
+            {/* 2. ACTIONS */}
+            <div className="flex justify-center py-4">
+                 {!isProcessing ? (
+                        <button 
+                            onClick={startProcessing}
+                            className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-12 rounded-xl shadow-lg shadow-blue-200 transition-all transform hover:-translate-y-1 active:scale-95 flex items-center justify-center gap-2 group w-full max-w-md"
+                        >
+                            <span>🚀 ANALYSE STARTEN</span>
+                        </button>
+                    ) : (
+                         <div className="bg-gray-900 text-white font-bold py-4 px-12 rounded-xl shadow-inner flex items-center justify-center gap-3 w-full max-w-md">
+                            <div className="animate-spin h-5 w-5 border-2 border-blue-500 border-t-transparent rounded-full"></div>
+                            <span>Verarbeite...</span>
+                        </div>
+                    )}
+            </div>
+
+            {/* 3. LAST RUN OUTPUT (FROM DB OR LIVE) */}
+            <div className="space-y-8">
+                {processLogs.length > 0 ? processLogs.map(log => (
+                    <div key={log.batchId} className={`rounded-2xl border-2 overflow-hidden transition-all ${
+                        log.status === 'loading' ? 'border-blue-400 bg-blue-50 animate-pulse' :
+                        log.status === 'done' ? 'border-gray-200 bg-white shadow-lg' :
+                        'border-red-100 bg-red-50'
+                    }`}>
+                        <div className="px-6 py-4 bg-gray-50 border-b border-gray-200 flex justify-between items-center">
+                            <div className="flex items-center gap-4">
+                                <span className="text-sm font-black uppercase tracking-widest text-gray-400">LAST OUTPUT</span>
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border bg-green-50 text-green-600 border-green-100">
+                                    Status: {log.status}
+                                </span>
+                            </div>
+                        </div>
+                        
+                        <div className="p-6 space-y-6">
+                             <div className="space-y-2">
+                                <div className="flex items-center gap-2 text-xs font-black text-gray-400 uppercase tracking-widest">
+                                    AI Output (Raw Response)
+                                </div>
+                                <div className="bg-black rounded-xl p-4 text-[10px] font-mono text-green-400 border border-gray-800 overflow-x-auto max-h-96">
+                                    <pre>{(log as any).debug?.output ? JSON.stringify((log as any).debug.output, null, 2) : "Warte auf Antwort..."}</pre>
+                                </div>
+                             </div>
+                        </div>
+                    </div>
+                )) : (
+                    <div className="text-center p-12 text-gray-400 border-2 border-dashed border-gray-200 rounded-2xl">
+                        Noch kein Output vorhanden. Starte die Analyse!
+                    </div>
+                )}
             </div>
 
             {/* UNCLUSTERED ITEMS WARNING */}
+
+            {/* UNCLUSTERED ITEMS WARNING / INFO */}
             {unclustered.length > 0 && (
-                <div className="bg-red-50 rounded-2xl shadow-sm border border-red-200 overflow-hidden mb-8">
-                    <div className="p-6 border-b border-red-100 flex justify-between items-center">
+                <div className={`rounded-2xl shadow-sm border overflow-hidden mb-8 ${liveInventory.length === 0 ? 'bg-blue-50 border-blue-200' : 'bg-red-50 border-red-200'}`}>
+                    <div className={`p-6 border-b flex justify-between items-center ${liveInventory.length === 0 ? 'border-blue-100' : 'border-red-100'}`}>
                         <div className="flex items-center gap-3">
-                            <div className="bg-red-100 text-red-600 p-2 rounded-lg">⚠️</div>
+                            <div className={`p-2 rounded-lg ${liveInventory.length === 0 ? 'bg-blue-100 text-blue-600' : 'bg-red-100 text-red-600'}`}>
+                                {liveInventory.length === 0 ? 'ℹ️' : '⚠️'}
+                            </div>
                             <div>
-                                <h2 className="font-bold text-red-800 text-lg">Nicht zugeordnete Items (Restposten)</h2>
-                                <p className="text-xs text-red-600 uppercase tracking-widest font-bold">Wurden vom AI-Prozess nicht erfasst</p>
+                                <h2 className={`font-bold text-lg ${liveInventory.length === 0 ? 'text-blue-800' : 'text-red-800'}`}>
+                                    {liveInventory.length === 0 ? 'Warteschlange (Rohdaten)' : 'Nicht zugeordnete Items (Restposten)'}
+                                </h2>
+                                <p className={`text-xs uppercase tracking-widest font-bold ${liveInventory.length === 0 ? 'text-blue-600' : 'text-red-600'}`}>
+                                    {liveInventory.length === 0 ? 'Bereit für Clustering' : 'Wurden vom AI-Prozess nicht erfasst'}
+                                </p>
                             </div>
                         </div>
                         
                         <div className="flex items-center gap-4">
-                            <span className="bg-red-200 text-red-800 text-sm font-black px-4 py-1 rounded-full">
+                            <span className={`text-sm font-black px-4 py-1 rounded-full ${liveInventory.length === 0 ? 'bg-blue-200 text-blue-800' : 'bg-red-200 text-red-800'}`}>
                                 {unclustered.length} Items
                             </span>
-                            <button 
-                                onClick={processLeftovers}
-                                disabled={loading}
-                                className="bg-white border border-red-300 text-red-700 hover:bg-red-100 px-4 py-2 rounded-lg text-xs font-bold uppercase shadow-sm transition-all"
-                            >
-                                {loading ? '⏳...' : '♻️ Restposten zuordnen'}
-                            </button>
+                            {liveInventory.length > 0 && (
+                                <button 
+                                    onClick={processLeftovers}
+                                    disabled={loading}
+                                    className="bg-white border border-red-300 text-red-700 hover:bg-red-100 px-4 py-2 rounded-lg text-xs font-bold uppercase shadow-sm transition-all"
+                                >
+                                    {loading ? '⏳...' : '♻️ Restposten zuordnen'}
+                                </button>
+                            )}
                         </div>
                     </div>
                     <div className="p-0">
                         <table className="w-full text-left text-xs text-gray-600">
-                             <thead className="bg-red-50/50 uppercase font-bold text-red-400 border-b border-red-100">
+                             <thead className={`uppercase font-bold border-b ${liveInventory.length === 0 ? 'bg-blue-50/50 text-blue-400 border-blue-100' : 'bg-red-50/50 text-red-400 border-red-100'}`}>
                                  <tr>
                                      <th className="px-6 py-3">Item Name</th>
                                      <th className="px-6 py-3">Shop</th>
@@ -403,7 +511,7 @@ export default function ProcessPage() {
                         <InventoryClusterCard 
                             key={i} 
                             cluster={cluster} 
-                            onOpenEmail={fetchEmail}
+                            onOpenEmail={fetchEmail} // Funktion durchreichen
                         />
                     ))}
                     
@@ -480,7 +588,7 @@ function InventoryClusterCard({ cluster, onOpenEmail }: { cluster: any, onOpenEm
                                             {item.mailId ? (
                                                 <button 
                                                     onClick={(e) => {
-                                                        e.stopPropagation();
+                                                        e.stopPropagation(); // Verhindert dass Accordion zuklappt
                                                         onOpenEmail(item.mailId);
                                                     }}
                                                     className="text-blue-600 hover:text-blue-800 underline font-mono text-[10px]"

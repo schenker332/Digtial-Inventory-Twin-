@@ -75,28 +75,54 @@ export default function GmailInbox() {
     }
   };
 
+  // Helper für Concurrency Pool
+  const runWithConcurrency = async <T>(items: T[], fn: (item: T) => Promise<void>, concurrency: number) => {
+      let index = 0;
+      const activePromises: Promise<void>[] = [];
+
+      const runNext = async (): Promise<void> => {
+          if (index >= items.length) return;
+          const currentIndex = index++;
+          const item = items[currentIndex];
+          
+          try {
+              await fn(item);
+          } finally {
+              // Wenn fertig, starte nächsten (rekursiv)
+              return runNext();
+          }
+      };
+
+      // Starte initial 'concurrency' Worker
+      for (let i = 0; i < concurrency && i < items.length; i++) {
+          activePromises.push(runNext());
+      }
+
+      await Promise.all(activePromises);
+  };
+
   const runDeepInspector = async () => {
       if (emails.length === 0) return;
       setIsMining(true);
       
-      const batchSize = 5;
-      for (let i = 0; i < emails.length; i += batchSize) {
-          const batch = emails.slice(i, i + batchSize);
-          await Promise.all(batch.map(async (mail) => {
-              try {
-                  setAnalysisResults(prev => ({ ...prev, [mail.id]: { status: 'loading' } }));
-                  const res = await fetch('/api/gmail/analyze', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ email: mail })
-                  });
-                  const data = await res.json();
-                  setAnalysisResults(prev => ({ ...prev, [mail.id]: { status: 'done', data: data } }));
-              } catch (e) {
-                  setAnalysisResults(prev => ({ ...prev, [mail.id]: { status: 'error' } }));
-              }
-          }));
-      }
+      await runWithConcurrency(emails, async (mail) => {
+          // Check ob schon analysiert (optional, aber gut für Performance)
+          // if (analysisResults[mail.id]?.status === 'done') return; 
+
+          try {
+              setAnalysisResults(prev => ({ ...prev, [mail.id]: { status: 'loading' } }));
+              const res = await fetch('/api/gmail/analyze', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ email: mail })
+              });
+              const data = await res.json();
+              setAnalysisResults(prev => ({ ...prev, [mail.id]: { status: 'done', data: data } }));
+          } catch (e) {
+              setAnalysisResults(prev => ({ ...prev, [mail.id]: { status: 'error' } }));
+          }
+      }, 5); // 5 Gleichzeitig
+
       setIsMining(false);
   };
 

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { PrismaClient } from "@prisma/client";
 
 // Jaccard-Ähnlichkeit zwischen zwei Sets von Wörtern
 function calculateSimilarity(name1: string, name2: string): number {
@@ -17,6 +17,7 @@ function calculateSimilarity(name1: string, name2: string): number {
 }
 
 export async function GET(request: Request) {
+  const prisma = new PrismaClient();
   try {
     const items = await prisma.item.findMany({
       include: { cluster: true },
@@ -134,5 +135,7 @@ export async function GET(request: Request) {
   } catch (error: any) {
     console.error("API Error:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
+  } finally {
+      await prisma.$disconnect();
   }
 }

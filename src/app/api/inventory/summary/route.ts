@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { prisma } from "@/lib/prisma"; // Use global singleton instead of new instance
+
+export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
