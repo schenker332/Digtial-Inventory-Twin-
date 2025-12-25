@@ -13,7 +13,10 @@ const openai = new OpenAI({
 
 async function searchSerper(query: string) {
     const apiKey = process.env.SERPER_API_KEY;
-    if (!apiKey) return [];
+    if (!apiKey) {
+        console.warn("⚠️ SERPER_API_KEY fehlt.");
+        return [];
+    }
     try {
         const response = await fetch("https://google.serper.dev/search", {
             method: 'POST',
@@ -36,7 +39,10 @@ async function searchSerper(query: string) {
 async function searchGoogle(query: string) {
     const apiKey = process.env.GOOGLE_SEARCH_API_KEY;
     const cx = process.env.GOOGLE_SEARCH_CX;
-    if (!apiKey || !cx) return [];
+    if (!apiKey || !cx) {
+        console.warn("⚠️ GOOGLE_SEARCH_API_KEY oder CX fehlt.");
+        return [];
+    }
     try {
         const url = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${cx}&q=${encodeURIComponent(query + " kaufen")}`;
         const response = await fetch(url);
@@ -183,7 +189,16 @@ export async function POST(request: Request) {
             const [serperResults, googleResults] = await Promise.all([searchSerper(input), searchGoogle(input)]);
             const allSearchResults = [...serperResults, ...googleResults];
             
-            if (allSearchResults.length === 0) throw new Error("Keine Ergebnisse gefunden.");
+            if (allSearchResults.length === 0) {
+                const missingKeys = [];
+                if (!process.env.SERPER_API_KEY) missingKeys.push("SERPER");
+                if (!process.env.GOOGLE_SEARCH_API_KEY) missingKeys.push("GOOGLE");
+                
+                if (missingKeys.length > 0) {
+                     throw new Error(`Keine Ergebnisse & fehlende API Keys: ${missingKeys.join(", ")}`);
+                }
+                throw new Error("Keine Suchergebnisse gefunden (APIs lieferten 0 Treffer).");
+            }
             send({ type: 'search_candidates', candidates: allSearchResults });
 
             // Run Search Prompt

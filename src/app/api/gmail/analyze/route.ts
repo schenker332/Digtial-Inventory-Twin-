@@ -33,6 +33,27 @@ export async function POST(request: Request) {
 
     if (cached) {
       const parsedResult = JSON.parse(cached.resultJson);
+      
+      // SELF-HEALING: Prüfen, ob Items in der DB fehlen, obwohl Cache sagt "Relevant"
+      if (cached.isRelevant && parsedResult.items && parsedResult.items.length > 0) {
+          const count = await prisma.item.count({ where: { analysisCacheId: email.id } });
+          if (count === 0) {
+              console.log(`🔧 Self-Healing: Erstelle fehlende Items für Mail ${email.id} aus Cache.`);
+              for (const item of parsedResult.items) {
+                await prisma.item.create({
+                    data: {
+                        name: item.name,
+                        price: item.price ? parseFloat(item.price.replace(',', '.')) : null,
+                        currency: item.currency || 'EUR',
+                        shop: item.shop || 'Unbekannt',
+                        buyDate: email.date ? new Date(email.date) : new Date(),
+                        analysisCacheId: email.id,
+                    }
+                });
+            }
+          }
+      }
+
       return NextResponse.json({
           mailId: email.id,
           is_relevant: cached.isRelevant,
@@ -185,8 +206,16 @@ export async function POST(request: Request) {
     };
 
     // DB SAVE (Relevant or Expert says no)
-    await prisma.analysisCache.create({
-        data: {
+    await prisma.analysisCache.upsert({
+        where: { id: email.id },
+        update: {
+            isRelevant: expertResult.is_relevant,
+            reasoning: expertResult.reasoning,
+            resultJson: JSON.stringify(finalResultObj),
+            debugInputG: userContentShort,
+            debugInputE: userContentFull
+        },
+        create: {
             id: email.id,
             isRelevant: expertResult.is_relevant,
             reasoning: expertResult.reasoning,
@@ -195,6 +224,28 @@ export async function POST(request: Request) {
             debugInputE: userContentFull
         }
     });
+
+    // --- NEU: ITEMS IN DIE 'Item' TABELLE SCHREIBEN ---
+    // Erst alte Items dieser Mail löschen (damit wir keine Duplikate bei Re-Run haben)
+    await prisma.item.deleteMany({
+        where: { analysisCacheId: email.id }
+    });
+
+    if (expertResult.is_relevant && expertResult.items && Array.isArray(expertResult.items)) {
+        for (const item of expertResult.items) {
+            await prisma.item.create({
+                data: {
+                    name: item.name,
+                    price: item.price ? parseFloat(item.price.replace(',', '.')) : null, // Preis parsen
+                    currency: item.currency || 'EUR',
+                    shop: item.shop || 'Unbekannt',
+                    buyDate: email.date ? new Date(email.date) : new Date(),
+                    analysisCacheId: email.id,
+                    // clusterId bleibt erstmal null
+                }
+            });
+        }
+    }
 
     return NextResponse.json(finalResultObj);
 

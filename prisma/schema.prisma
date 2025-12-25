@@ -38,6 +38,8 @@ model Item {
 
   clusterId       String?
   cluster         Cluster? @relation(fields: [clusterId], references: [id])
+  
+  originalFamily  String?  // NEU: Speichert den Familiennamen vor dem Merge
 
   analysisCacheId String?
   analysisCache   AnalysisCache? @relation(fields: [analysisCacheId], references: [id])

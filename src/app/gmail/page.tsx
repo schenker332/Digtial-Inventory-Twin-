@@ -199,13 +199,13 @@ export default function GmailInbox() {
             
             <div className="overflow-y-auto flex-1 p-2 space-y-2">
                 {loading && <div className="p-4 text-center text-gray-500">Lade Mails...</div>}
-                {displayedEmails.map(mail => {
+                {displayedEmails.map((mail, idx) => {
                     const analysis = analysisResults[mail.id];
                     const isRelevant = analysis?.data?.is_relevant;
                     const items = analysis?.data?.items || [];
 
                     return (
-                        <div key={mail.id} onClick={() => setSelectedMail(mail)} className={`relative p-4 rounded-xl cursor-pointer border transition-all ${selectedMail?.id === mail.id ? 'bg-blue-50 border-blue-500' : 'bg-white border-gray-100'} ${isRelevant ? 'border-l-4 border-l-green-500' : ''}`}>
+                        <div key={`${mail.id}-${idx}`} onClick={() => setSelectedMail(mail)} className={`relative p-4 rounded-xl cursor-pointer border transition-all ${selectedMail?.id === mail.id ? 'bg-blue-50 border-blue-500' : 'bg-white border-gray-100'} ${isRelevant ? 'border-l-4 border-l-green-500' : ''}`}>
                                         <div className="absolute top-2 right-2">
                                             {analysis?.status === 'loading' && <span className="animate-spin text-gray-400 text-xs">⏳</span>}
                                             {analysis?.status === 'done' && (
