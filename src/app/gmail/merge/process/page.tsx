@@ -155,6 +155,25 @@ export default function ProcessPage() {
 
     const [selectedProduct, setSelectedProduct] = useState<any>(null); // Für die Sidebar
 
+    async function processLeftovers() {
+        if (!confirm("Soll die AI versuchen, diese Restposten automatisch zuzuordnen?")) return;
+        setLoading(true);
+        try {
+            const res = await fetch("/api/gmail/process-leftovers", { method: "POST" });
+            const data = await res.json();
+            console.log(data.logs);
+            // Reload Inventory
+            const invRes = await fetch("/api/inventory/summary");
+            const invData = await invRes.json();
+            if (invData.summary) setLiveInventory(invData.summary);
+            setUnclustered(invData.unclustered || []);
+        } catch (e) {
+            alert("Fehler beim Aufräumen.");
+        } finally {
+            setLoading(false);
+        }
+    }
+
     return (
         <div className="p-8 max-w-6xl mx-auto bg-gray-50 min-h-screen font-sans space-y-12 relative">
             
@@ -308,9 +327,19 @@ export default function ProcessPage() {
                                 <p className="text-xs text-red-600 uppercase tracking-widest font-bold">Wurden vom AI-Prozess nicht erfasst</p>
                             </div>
                         </div>
-                        <span className="bg-red-200 text-red-800 text-sm font-black px-4 py-1 rounded-full">
-                            {unclustered.length} Items
-                        </span>
+                        
+                        <div className="flex items-center gap-4">
+                            <span className="bg-red-200 text-red-800 text-sm font-black px-4 py-1 rounded-full">
+                                {unclustered.length} Items
+                            </span>
+                            <button 
+                                onClick={processLeftovers}
+                                disabled={loading}
+                                className="bg-white border border-red-300 text-red-700 hover:bg-red-100 px-4 py-2 rounded-lg text-xs font-bold uppercase shadow-sm transition-all"
+                            >
+                                {loading ? '⏳...' : '♻️ Restposten zuordnen'}
+                            </button>
+                        </div>
                     </div>
                     <div className="p-0">
                         <table className="w-full text-left text-xs text-gray-600">
