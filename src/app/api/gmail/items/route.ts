@@ -1,74 +1,127 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
-// Level 1: Exakte Übereinstimmung (bereinigt)
-function getExactKey(name: string) {
-  return name.trim().toLowerCase();
-}
+// Jaccard-Ähnlichkeit zwischen zwei Sets von Wörtern
+function calculateSimilarity(name1: string, name2: string): number {
+  const tokens1 = new Set(name1.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter(t => t.length > 2));
+  const tokens2 = new Set(name2.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter(t => t.length > 2));
 
-// Level 2: Familien-Zugehörigkeit (Wort-basiert, toleranter)
-function getFamilyKey(name: string) {
-  const tokens = name
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ") 
-    .split(/\s+/) 
-    .filter(t => t.length > 2) 
-    .sort(); 
-  
-  // Die ersten 3 signifikanten Wörter definieren die "Familie"
-  return tokens.slice(0, 3).join(" "); 
+  const intersection = new Set([...tokens1].filter(x => tokens2.has(x)));
+  const union = new Set([...tokens1, ...tokens2]);
+
+  if (union.size === 0) return 0;
+  return intersection.size / union.size;
 }
 
 export async function GET() {
   try {
     const items = await prisma.item.findMany({
-      include: {
-        cluster: true,
-      },
-      orderBy: {
-        buyDate: 'desc'
-      }
+      include: { cluster: true },
+      orderBy: { buyDate: 'desc' }
     });
 
-    // 1. Erstmal alles streng gruppieren (Exact Match)
-    const exactGroups: Record<string, any[]> = {};
+    // 1. Level: Strenge Gruppierung (Exact Match)
+    const exactGroups: { name: string, items: any[] }[] = [];
+    
+    // Map hilft uns, Items schnell zuzuordnen
+    const groupedMap = new Map<string, any[]>();
+
     items.forEach(item => {
-      const exactKey = getExactKey(item.name);
-      if (!exactGroups[exactKey]) exactGroups[exactKey] = [];
-      exactGroups[exactKey].push(item);
+      const key = item.name.trim();
+      if (!groupedMap.has(key)) groupedMap.set(key, []);
+      groupedMap.get(key)!.push(item);
     });
 
-    // 2. Jetzt die strengen Gruppen zu Familien zusammenfassen
-    const families: Record<string, { familyName: string, subgroups: any[] }> = {};
+    groupedMap.forEach((groupItems, name) => {
+      exactGroups.push({ name, items: groupItems });
+    });
 
-    Object.entries(exactGroups).forEach(([exactName, groupItems]) => {
-      // Wir nehmen den Namen des ersten Items der Gruppe, um den Familien-Key zu bestimmen
-      const representativeName = groupItems[0].name;
-      const familyKey = getFamilyKey(representativeName);
+    // 2. Level: Familien bilden mit Ähnlichkeits-Logik (O(n^2) aber okay für < 1000 Gruppen)
+    const families: { familyName: string, subgroups: any[] }[] = [];
+    const assignedIndices = new Set<number>();
 
-      if (!families[familyKey]) {
-        families[familyKey] = {
-          familyName: representativeName, // Der Name der Familie ist erstmal der Name des ersten Mitglieds
-          subgroups: []
-        };
+    // Wir sortieren die Gruppen nach Länge (längere Namen sind oft präziser)
+    exactGroups.sort((a, b) => b.name.length - a.name.length);
+
+    for (let i = 0; i < exactGroups.length; i++) {
+      if (assignedIndices.has(i)) continue;
+
+      const currentGroup = exactGroups[i];
+      const family = {
+        familyName: currentGroup.name, // Der erste wird Familien-Chef
+        subgroups: [currentGroup]
+      };
+      assignedIndices.add(i);
+
+      // Suche nach passenden "Verwandten" in den restlichen Gruppen
+      for (let j = i + 1; j < exactGroups.length; j++) {
+        if (assignedIndices.has(j)) continue;
+
+        const otherGroup = exactGroups[j];
+        const similarity = calculateSimilarity(currentGroup.name, otherGroup.name);
+
+        if (similarity >= 0.6) {
+          family.subgroups.push({
+            ...otherGroup,
+            similarity: Math.round(similarity * 100)
+          });
+          assignedIndices.add(j);
+        }
       }
       
-      // Wir fügen die ganze exakte Gruppe als Untergruppe zur Familie hinzu
-      families[familyKey].subgroups.push({
-        name: representativeName, // Name dieser spezifischen Variante
-        items: groupItems
-      });
-    });
+      // Das erste Element (der "Chef") hat 100% Ähnlichkeit zu sich selbst
+      family.subgroups[0] = {
+        ...family.subgroups[0],
+        similarity: 100
+      };
 
-    // Wir geben nur die Werte zurück (Array von Familien)
-    return NextResponse.json({ 
-      families: Object.values(families).sort((a, b) => {
-        // Sortieren nach Größe der Familie (Anzahl aller Items in allen Subgroups)
+      families.push(family);
+    }
+
+      // Sortieren: Größte Familien nach oben
+    families.sort((a, b) => {
         const countA = a.subgroups.reduce((acc, sg) => acc + sg.items.length, 0);
         const countB = b.subgroups.reduce((acc, sg) => acc + sg.items.length, 0);
         return countB - countA;
-      })
     });
+
+    // NEU: 100% Matches innerhalb einer Familie verschmelzen
+    families.forEach(family => {
+        const mergedSubgroups: any[] = [];
+        const processedIndices = new Set<number>();
+
+        // Sortiere Subgroups so, dass der "Familien-Chef" (100% Match) vorne steht
+        family.subgroups.sort((a, b) => (b.similarity || 0) - (a.similarity || 0));
+
+        for (let i = 0; i < family.subgroups.length; i++) {
+            if (processedIndices.has(i)) continue;
+
+            const base = family.subgroups[i];
+            const mergedItems = [...base.items];
+
+            for (let j = i + 1; j < family.subgroups.length; j++) {
+                if (processedIndices.has(j)) continue;
+                
+                // Prüfen ob Items quasi identisch sind (Wort-Ebene)
+                const candidate = family.subgroups[j];
+                const sim = calculateSimilarity(base.name, candidate.name);
+
+                if (sim >= 0.99) { // Faktisch identisch
+                    mergedItems.push(...candidate.items);
+                    processedIndices.add(j);
+                }
+            }
+
+            mergedSubgroups.push({
+                ...base,
+                items: mergedItems
+            });
+            processedIndices.add(i);
+        }
+        family.subgroups = mergedSubgroups;
+    });
+
+    return NextResponse.json({ families });
 
   } catch (error: any) {
     console.error("API Error:", error);

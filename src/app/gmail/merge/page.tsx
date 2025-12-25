@@ -71,6 +71,13 @@ export default function MergePage() {
                     <h3 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
                         <span className="w-2 h-2 rounded-full bg-gray-300"></span>
                         Variante: "{subgroup.name}" 
+                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                            subgroup.similarity === 100 
+                            ? 'bg-green-100 text-green-800' 
+                            : 'bg-blue-100 text-blue-800'
+                        }`}>
+                            {subgroup.similarity}% Match
+                        </span>
                         <span className="text-gray-400 font-normal">({subgroup.items.length})</span>
                     </h3>
                     
