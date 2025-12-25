@@ -86,6 +86,7 @@ export default function MergePage() {
                         <table className="w-full text-left text-xs text-gray-500">
                             <thead className="bg-gray-50 uppercase">
                                 <tr>
+                                    <th className="px-3 py-2">Originaler Name aus E-Mail</th>
                                     <th className="px-3 py-2">Shop</th>
                                     <th className="px-3 py-2">Preis</th>
                                     <th className="px-3 py-2">Datum</th>
@@ -94,6 +95,7 @@ export default function MergePage() {
                             <tbody className="divide-y divide-gray-50">
                                 {subgroup.items.map((item: any) => (
                                     <tr key={item.id} className="hover:bg-gray-50">
+                                        <td className="px-3 py-2 text-gray-900 font-medium">{item.name}</td>
                                         <td className="px-3 py-2">{item.shop || "-"}</td>
                                         <td className="px-3 py-2 font-mono">{item.price} {item.currency}</td>
                                         <td className="px-3 py-2">{new Date(item.buyDate).toLocaleDateString()}</td>
